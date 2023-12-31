@@ -1,0 +1,5 @@
+build/
+dist/
+wordle_solver.spec
+
+.ruff_cache/
