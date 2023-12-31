@@ -27,4 +27,6 @@ pylint wordle_solver.py
 ```
 
 ### Packaging
-TODO
+```
+pyinstaller -F -i wordle_icon.ico .\wordle_solver.py
+```
