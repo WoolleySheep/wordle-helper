@@ -1,11 +1,11 @@
-# Wordle Solver for Mum
+# Wordle Helper for Mum
 Tool to help with solving the daily wordle.
 
 ## User
-### Run wordle_solver.
+### Run wordle helper.
 1. Open terminal
-2. Navigate to directory containing wordle_solver.exe
-3. Run command `wordle_solver.exe`
+2. Navigate to directory containing wordle_helper.exe
+3. Run command `wordle_helper.exe`
 
 ## Developer
 ### Setup
@@ -23,10 +23,10 @@ poetry install
 ### Linting
 ```
 ruff check --fix
-pylint wordle_solver.py
+pylint wordle_helper.py
 ```
 
 ### Packaging
 ```
-pyinstaller -F -i wordle_icon.ico .\wordle_solver.py
+pyinstaller -F -i wordle_icon.ico .\wordle_helper.py
 ```
