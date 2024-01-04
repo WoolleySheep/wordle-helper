@@ -1,5 +1,18 @@
 import enum
+import itertools
 import string
+from collections.abc import Generator, Sequence
+from typing import Self
+
+from allowed_guesses import ALLOWED_GUESSES
+
+
+class Position(enum.Enum):
+    FIRST = "first"
+    SECOND = "second"
+    THIRD = "third"
+    FOURTH = "fourth"
+    FIFTH = "fifth"
 
 
 class Letter:
@@ -21,6 +34,12 @@ class Letter:
 
         return str(self) == str(other)
 
+    def __lt__(self, other: Self) -> bool:
+        if not isinstance(other, Letter):
+            raise NotImplementedError
+
+        return str(self) < str(other)
+
     def __hash__(self) -> int:
         return hash(self._text)
 
@@ -29,6 +48,10 @@ ALL_LETTERS = {Letter(char) for char in string.ascii_lowercase}
 
 
 class Word:
+    @staticmethod
+    def is_valid_text(text: str) -> bool:
+        return len(text) == 5 and all(char.isalpha() for char in text)
+
     @classmethod
     def from_string(cls, text: str, /) -> "Word":
         if len(text) != 5:
@@ -56,48 +79,82 @@ class Word:
         self.fourth = fourth
         self.fifth = fifth
 
-    def __str__(self) -> str:
-        return f"{self.first}{self.second}{self.third}{self.fourth}{self.fifth}"
-
-    def __hash__(self) -> int:
-        return hash((self.first, self.second, self.third, self.fourth, self.fifth))
+    def __iter__(self) -> Generator[Letter, None, None]:
+        yield self.first
+        yield self.second
+        yield self.third
+        yield self.fourth
+        yield self.fifth
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Word):
             raise NotImplementedError
 
-        return (
-            self.first == other.first
-            and self.second == other.second
-            and self.third == other.third
-            and self.fourth == other.fourth
-            and self.fifth == other.fifth
-        )
+        return all(l1 == l2 for l1, l2 in zip(self, other))
+
+    def __lt__(self, other: Self) -> bool:
+        if not isinstance(other, Word):
+            raise NotImplementedError
+
+        return str(self) < str(other)
+
+    def __str__(self) -> str:
+        return "".join(str(letter) for letter in self)
+
+    def __hash__(self) -> int:
+        return hash((self.first, self.second, self.third, self.fourth, self.fifth))
 
     def __repr__(self) -> str:
         return f"word({self})"
 
 
-class Outcome(enum.Enum):
+class Result(enum.Enum):
     CORRECT_SPOT = enum.auto()
     WRONG_SPOT = enum.auto()
     NOT_IN_WORD = enum.auto()
 
 
-class LetterOutcome:
-    def __init__(self, letter: Letter, outcome: Outcome) -> None:
+def map_text_to_result(text: str) -> Result:
+    match text:
+        case "C":
+            return Result.CORRECT_SPOT
+        case "B":
+            return Result.WRONG_SPOT
+        case "A":
+            return Result.NOT_IN_WORD
+
+    raise ValueError("Invalid text")
+
+
+class LetterGuess:
+    def __init__(self, letter: Letter, result: Result) -> None:
         self.letter = letter
-        self.outcome = outcome
+        self.result = result
 
 
-class GuessOutcome:
+class WordGuess:
+    @classmethod
+    def from_word_and_guesses(
+        cls, word: Word, results: Sequence[Result]
+    ) -> "WordGuess":
+        if len(results) != 5:
+            raise ValueError("Invalid guesses length")
+
+        return cls(
+            first=LetterGuess(word.first, results[0]),
+            second=LetterGuess(word.second, results[1]),
+            third=LetterGuess(word.third, results[2]),
+            fourth=LetterGuess(word.fourth, results[3]),
+            fifth=LetterGuess(word.fifth, results[4]),
+        )
+
     def __init__(
         self,
-        first: LetterOutcome,
-        second: LetterOutcome,
-        third: LetterOutcome,
-        fourth: LetterOutcome,
-        fifth: LetterOutcome,
+        first: LetterGuess,
+        second: LetterGuess,
+        third: LetterGuess,
+        fourth: LetterGuess,
+        fifth: LetterGuess,
     ) -> None:
         self.first = first
         self.second = second
@@ -105,90 +162,224 @@ class GuessOutcome:
         self.fourth = fourth
         self.fifth = fifth
 
-    def __str__(self) -> str:
-        return f"{self.first or '?'}{self.second or '?'}{self.third or '?'}{self.fourth or '?'}{self.fifth or '?'}"
+    def __iter__(self) -> Generator[LetterGuess, None, None]:
+        yield self.first
+        yield self.second
+        yield self.third
+        yield self.fourth
+        yield self.fifth
 
-class LetterOptions:
 
+class GameProgress:
     def __init__(self) -> None:
-        self.possible_options = ALL_LETTERS.copy()
-        self.wrong_spot_options = set[Letter]()
+        self.first: Letter | set[Letter] = ALL_LETTERS.copy()
+        self.second: Letter | set[Letter] = ALL_LETTERS.copy()
+        self.third: Letter | set[Letter] = ALL_LETTERS.copy()
+        self.fourth: Letter | set[Letter] = ALL_LETTERS.copy()
+        self.fifth: Letter | set[Letter] = ALL_LETTERS.copy()
 
-    def discard_possible_option(self, letter: Letter, /) -> None:
-        self.possible_options.remove(letter)
+        self.must_include: set[Letter] = set()
 
-    def discard_wrong_spot_option(self, letter: Letter, /) -> None:
-        self.wrong_spot_options.remove(letter)
+    def __iter__(self) -> Generator[Letter | set[Letter], None, None]:
+        yield self.first
+        yield self.second
+        yield self.third
+        yield self.fourth
+        yield self.fifth
 
-class WordProgress:
-    def __init__(self) -> None:
-        self.first: Letter | LetterOptions = LetterOptions()
-        self.second: Letter | LetterOptions = LetterOptions()
-        self.third: Letter | LetterOptions = LetterOptions()
-        self.fourth: Letter | LetterOptions = LetterOptions()
-        self.fifth: Letter | LetterOptions = LetterOptions()
+    def update(self, guess: WordGuess) -> None:
+        def update_correct_letter(
+            self: Self, position: Position, letter: Letter
+        ) -> None:
+            match position:
+                case Position.FIRST:
+                    self.first = letter
+                case Position.SECOND:
+                    self.second = letter
+                case Position.THIRD:
+                    self.third = letter
+                case Position.FOURTH:
+                    self.fourth = letter
+                case Position.FIFTH:
+                    self.fifth = letter
 
-    def nunknown_letters(self) -> int:
-        count = 0
-        if isinstance(self.first, Letter):
-            count += 1
-        if isinstance(self.second, Letter):
-            count += 1
-        if isinstance(self.third, Letter):
-            count += 1
-        if isinstance(self.fourth, Letter):
-            count += 1
-        if isinstance(self.fifth, Letter):
-            count += 1
-        return count
+            if letter in self.must_include:
+                self.must_include.remove(letter)
 
-    def update(self, outcome: GuessOutcome) -> None:
-        raise NotImplementedError
-    
-    def _found_letter_not_in_word(self, letter: Letter) -> None:
-        if isinstance(self.first, LetterOptions):
-            self.first.discard_possible_option(letter)
-        if isinstance(self.second, LetterOptions):
-            self.second.discard_possible_option(letter)
-        if isinstance(self.third, LetterOptions):
-            self.third.discard_possible_option(letter)
-        if isinstance(self.fourth, LetterOptions):
-            self.fourth.discard_possible_option(letter)
-        if isinstance(self.fifth, LetterOptions):
-            self.fifth.discard_possible_option(letter)
+        def update_letter_in_wrong_spot(
+            self: Self, position: Position, letter: Letter
+        ) -> None:
+            match position:
+                case Position.FIRST:
+                    if isinstance(self.first, set):
+                        self.first.remove(letter)
+                case Position.SECOND:
+                    if isinstance(self.second, set):
+                        self.second.remove(letter)
+                case Position.THIRD:
+                    if isinstance(self.third, set):
+                        self.third.remove(letter)
+                case Position.FOURTH:
+                    if isinstance(self.fourth, set):
+                        self.fourth.remove(letter)
+                case Position.FIFTH:
+                    if isinstance(self.fifth, set):
+                        self.fifth.remove(letter)
 
-    def _found_letter_wrong_spot(self, letter: Letter) -> None:
+            for options in self:
+                if isinstance(options, set):
+                    continue
 
+                if letter == options:
+                    return
+
+            self.must_include.add(letter)
+
+        def update_letter_is_not_in_word(self: Self, letter: Letter) -> None:
+            for letter_options in self:
+                if isinstance(letter_options, Letter):
+                    continue
+
+                if letter in letter_options:
+                    letter_options.remove(letter)
+
+        def collapse_must_include(self: Self) -> None:
+            def collapse_letter(self: Self, letter: Letter) -> None:
+                """If a must-include letter can fit only one place, set it."""
+                valid_position: Position | None = None
+                for position, options in zip(Position, self):
+                    if isinstance(options, Letter):
+                        continue
+
+                    if letter in options:
+                        if valid_position:
+                            return
+                        valid_position = position
+
+                if valid_position:
+                    update_correct_letter(self, valid_position, letter)
+
+            while True:
+                initial_must_include = self.must_include.copy()
+                for letter in initial_must_include:
+                    collapse_letter(self, letter)
+                if initial_must_include == self.must_include:
+                    break
+
+        for position, letter_guess in zip(Position, guess):
+            match letter_guess.result:
+                case Result.CORRECT_SPOT:
+                    update_correct_letter(self, position, letter_guess.letter)
+                case Result.WRONG_SPOT:
+                    update_letter_in_wrong_spot(self, position, letter_guess.letter)
+                case Result.NOT_IN_WORD:
+                    update_letter_is_not_in_word(self, letter_guess.letter)
+
+        collapse_must_include(self)
 
     def is_possible_match(self, word: Word) -> bool:
-        if isinstance(self.first, Letter):
-            if word.first != self.first:
+        for letter, options in zip(word, self):
+            if isinstance(options, Letter):
+                if letter != options:
+                    return False
+            elif letter not in options:
                 return False
-        elif word.first not in self.first:
-            return False
 
-        if isinstance(self.second, Letter):
-            if word.second != self.second:
-                return False
-        elif word.second not in self.second:
-            return False
+        return all(letter in word for letter in self.must_include)
 
-        if isinstance(self.third, Letter):
-            if word.third != self.third:
-                return False
-        elif word.third not in self.third:
-            return False
 
-        if isinstance(self.fourth, Letter):
-            if word.fourth != self.fourth:
-                return False
-        elif word.fourth not in self.fourth:
-            return False
+def get_matching_words(
+    progress: GameProgress, words: list[Word]
+) -> Generator[Word, None, None]:
+    for word in words:
+        if not progress.is_possible_match(word):
+            continue
 
-        if isinstance(self.fifth, Letter):
-            if word.fifth != self.fifth:
-                return False
-        elif word.fifth not in self.fifth:
-            return False
+        yield word
 
-        return True
+
+def print_info(progress: GameProgress, remaining: Sequence[Word]) -> None:
+    print("Known letters")
+    chars = (str(letter) if isinstance(letter, Letter) else " " for letter in progress)
+    print(f"  |{"|".join(chars)}|")
+    print("-----------")
+    print("Required letters")
+    for letter in sorted(progress.must_include):
+        chars = (
+            "X" if isinstance(options, set) and letter in options else " "
+            for options in progress
+        )
+        print(f"{letter} |{"|".join(chars)}|")
+    print("-----------")
+    print("Available letters")
+    for letter in sorted(ALL_LETTERS):
+        chars = (
+            "X" if isinstance(options, set) and letter in options else " "
+            for options in progress
+        )
+        print(f"{letter} |{"|".join(chars)}|")
+    print("-----------")
+    print(f"Possible words ({len(remaining)} options)")
+    for word in remaining:
+        chars = (str(letter) for letter in word)
+        print(f"  |{'|'.join(chars)}|")
+    print("-----------")
+
+
+def is_valid_word(text: str) -> bool:
+    try:
+        Word.from_string(text)
+    except Exception:
+        return False
+
+    return True
+
+
+def main() -> None:
+    print("Welcome to wordle-helper! Made for mum.")
+    print(
+        "When entering information, [square brackets] represents the default if you leave it blank."
+    )
+    progress = GameProgress()
+    remaining_options = [Word.from_string(guess) for guess in ALLOWED_GUESSES]
+    for nguesses in itertools.count(1):
+        while not Word.is_valid_text(guess_txt := input("Enter your next guess: ")):
+            print("Invalid word. Please try again.")
+        guess = Word.from_string(guess_txt)
+        while (
+            guess_correct := (
+                input(f'Was your guess "{guess}" correct? (Y: Yes, N: No) [N]: ') or "N"
+            ).upper()
+        ) not in {"Y", "N"}:
+            print("Invalid input. Please enter Y or N.")
+        if guess_correct == "Y":
+            print(f"Congratulations, you solved the wordle in {nguesses} guesses!")
+            break
+
+        print("Bummer. Alright, let's try again.")
+        print("Confirm the letters that you guessed right:")
+        results = []
+        for position, letter in zip(Position, guess):
+            while (
+                result := (
+                    input(
+                        f'- {position.value} letter "{letter}" (A: Incorrect, B: Wrong spot, C: Correct) [A]: '
+                    )
+                    or "A"
+                ).upper()
+            ) not in {"A", "B", "C"}:
+                print("Invalid input. Please enter A, B, or C.")
+            results.append(map_text_to_result(result))
+
+        guess_result = WordGuess.from_word_and_guesses(guess, results)
+        progress.update(guess_result)
+
+        print("Crunching the letters...")
+        remaining_options = list(get_matching_words(progress, remaining_options))
+        print_info(progress, remaining_options)
+
+    input()  # To keep console open
+
+
+if __name__ == "__main__":
+    main()

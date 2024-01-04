@@ -1,5 +1,7 @@
 build/
 dist/
-wordle_solver.spec
+wordle_helper.spec
 
 .ruff_cache/
+
+__pycache__/
